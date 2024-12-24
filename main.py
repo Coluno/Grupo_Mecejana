@@ -5,7 +5,7 @@ import requests
 
 # Configuração do título e imagem
 st.set_page_config(page_title="Análise de Reservas da Pousada", layout="centered")
-st.image("logo.png", width=300)  # Adiciona a imagem da logo
+st.image("./logo.png", width=300)  # Adiciona a imagem da logo
 
 # Carregar dados do arquivo Check-in.xls
 data_file = "Check-in.xls"  # Certifique-se de que o arquivo esteja no mesmo diretório ou forneça o caminho correto
