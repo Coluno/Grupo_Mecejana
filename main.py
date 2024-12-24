@@ -8,7 +8,7 @@ st.set_page_config(page_title="Análise de Reservas da Pousada", layout="centere
 #st.image("./logo.png", width=300)  # Adiciona a imagem da logo
 
 # Carregar dados do arquivo Check-in.xls
-df = pd.read_excel("Check-in.xls")
+df = pd.read_excel("Check-in.xlsx")
 
 # Seleção de colunas relevantes e tratamento dos dados
 df_filtrado = df[["Entrada", "Saída", "Quartos", "Pessoas", "Preço", "Valor da comissão", "Duração (diárias)"]]
