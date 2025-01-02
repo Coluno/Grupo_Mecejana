@@ -1,90 +1,81 @@
-import streamlit as st
+import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
-import requests
+import yfinance as yf
+import plotly.express as px
+import streamlit as st
+from scipy.stats import norm
 
-# Configuração do título e imagem
-st.set_page_config(page_title="Análise de Reservas da Pousada", layout="centered")
-#st.image("./logo.png", width=300)  # Adiciona a imagem da logo
+# Função para calcular o modelo Jump-Diffusion
+def modelo_jump_diffusion(symbol, start_date, sigma=None, jump_intensity=0.01, jump_mean=0.02, jump_vol=0.1, T=1, steps=252):
+    # Baixar dados históricos do ativo
+    data = yf.download(symbol, start=start_date, end="2024-01-01")
+    data.reset_index(inplace=True)
+    data.set_index('Date', inplace=True)
 
-# Carregar dados do arquivo Check-in.xls
-df = pd.read_excel("Check-in.xlsx")
-
-# Seleção de colunas relevantes e tratamento dos dados
-df_filtrado = df[["Entrada", "Saída", "Quartos", "Pessoas", "Preço", "Valor da comissão", "Duração (diárias)"]]
-df_filtrado["Entrada"] = pd.to_datetime(df_filtrado["Entrada"])
-df_filtrado["Saída"] = pd.to_datetime(df_filtrado["Saída"])
-df_filtrado["Preço"] = df_filtrado["Preço"].str.replace(" BRL", "").astype(float)
-df_filtrado["Valor da comissão"] = df_filtrado["Valor da comissão"].str.replace(" BRL", "").astype(float)
-df_filtrado["Receita Líquida"] = df_filtrado["Preço"] - df_filtrado["Valor da comissão"]
-df_filtrado["Mês"] = df_filtrado["Entrada"].dt.month
-
-# Configuração do Streamlit
-st.title("Análise de Reservas da Pousada")
-
-# Sidebar
-st.sidebar.title("Selecione uma análise")
-analise = st.sidebar.radio("Escolha a análise desejada:", ["Análise Financeira", "Análise Temporal"])
-
-# Análise Financeira
-if analise == "Análise Financeira":
-    st.header("Análise Financeira")
+    # Cálculos de retornos diários
+    data['Log Returns'] = np.log(data['Adj Close'] / data['Adj Close'].shift(1))
     
-    # Selecionar intervalo de datas
-    min_date = df_filtrado["Entrada"].min()
-    max_date = df_filtrado["Entrada"].max()
-    start_date, end_date = st.sidebar.date_input(
-        "Selecione o intervalo de datas:",
-        [min_date, max_date],
-        min_value=min_date,
-        max_value=max_date
-    )
+    # Calcular a volatilidade histórica, se sigma não for fornecido
+    if sigma is None:
+        sigma = data['Log Returns'].std()  # Volatilidade histórica (desvio padrão dos retornos diários)
+
+    # Parâmetros do modelo
+    mu = data['Log Returns'].mean()  # Taxa de retorno média
+    dt = T / steps  # Tamanho do intervalo de tempo
+
+    # Inicializando os preços simulados
+    S0 = data['Adj Close'][-1]  # Preço inicial
+    prices = [S0]
     
-    # Filtrar os dados com base nas datas selecionadas
-    df_filtrado_data = df_filtrado[
-        (df_filtrado["Entrada"] >= pd.to_datetime(start_date)) & 
-        (df_filtrado["Entrada"] <= pd.to_datetime(end_date))
-    ]
+    # Simulação do preço com o modelo Jump-Diffusion
+    for _ in range(steps):
+        # Difusão Browniana
+        dW = np.random.normal(0, 1) * np.sqrt(dt)
+        # Saltos
+        jump = np.random.poisson(jump_intensity) * np.random.normal(jump_mean, jump_vol)
+        
+        # Cálculo do preço no próximo passo
+        S_t = prices[-1] * np.exp((mu - 0.5 * sigma**2) * dt + sigma * dW + jump)
+        prices.append(S_t)
     
-    # Gráfico de Receita Líquida por mês
-    receita_liquida_mensal = df_filtrado_data.groupby("Mês")["Receita Líquida"].sum()
-    
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=receita_liquida_mensal.index,
-        y=receita_liquida_mensal.values,
-        text=[f"R$ {val:,.2f}" for val in receita_liquida_mensal.values],
-        textposition="auto",
-        marker_color="blue"
-    ))
-    fig.update_layout(
-        title="Receita Líquida por Mês",
-        xaxis_title="Mês",
-        yaxis_title="Receita Líquida (R$)",
-        template="plotly_white"
-    )
+    data['Simulated Price'] = prices[:len(data)]  # Preço simulado
+
+    # Gráfico de preço simulado
+    fig = px.line(data, x=data.index, y=['Adj Close', 'Simulated Price'], title=f"Simulação Jump-Diffusion - {symbol}")
     st.plotly_chart(fig)
 
-# Análise Temporal
-elif analise == "Análise Temporal":
-    st.header("Análise Temporal")
-    
-    # Gráfico de número de reservas por mês
-    reservas_por_mes = df_filtrado.groupby("Mês")["Entrada"].count()
-    
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=reservas_por_mes.index,
-        y=reservas_por_mes.values,
-        mode="lines+markers",
-        line=dict(color="orange"),
-        marker=dict(size=10),
-        text=[f"{int(val)} reservas" for val in reservas_por_mes.values]
-    ))
-    fig.update_layout(
-        title="Número de Reservas por Mês",
-        xaxis_title="Mês",
-        yaxis_title="Quantidade de Reservas",
-        template="plotly_white"
-    )
-    st.plotly_chart(fig)
+    return data
+
+# Função principal para Streamlit
+def volatilidade_jump_diffusion():
+    # Configuração da interface do usuário
+    st.title("Simulação de Preços - Modelo Jump-Diffusion")
+
+    # Seleção da variável a ser estudada
+    variable = st.selectbox("Escolha a variável para estudar:", ["Açúcar", "Dólar"])
+
+    # Seleção da data de início
+    start_date = st.date_input("Selecione a data de início:", value=pd.to_datetime("2013-01-01"))
+
+    # Definindo o símbolo com base na variável escolhida
+    symbol = "SB=F" if variable == "Açúcar" else "USDBRL=X"
+
+    # Entrada do usuário para sigma (volatilidade), que pode ser deixado em branco para usar a volatilidade histórica
+    sigma_input = st.text_input("Digite o valor de sigma (volatilidade):", value="")
+
+    # Se o usuário não inserir o valor de sigma, utilizar a volatilidade histórica
+    sigma = float(sigma_input) if sigma_input else None
+
+    # Botão para iniciar a simulação
+    if st.button("Simular"):
+        # Obtenção dos dados históricos e simulação do modelo Jump-Diffusion
+        data = modelo_jump_diffusion(symbol, start_date.strftime('%Y-%m-%d'), sigma)
+
+        # Exibindo o gráfico de preços simulados
+        st.subheader(f"Simulação de Preços - {variable}")
+        if sigma is None:
+            st.write(f"A volatilidade utilizada (sigma) foi calculada com base nos dados históricos do ativo.")
+        else:
+            st.write(f"A volatilidade utilizada (sigma) foi definida pelo usuário: {sigma}")
+        st.write(data.tail())  # Exibindo as últimas linhas dos dados simulados
+
